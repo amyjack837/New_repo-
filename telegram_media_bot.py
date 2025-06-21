@@ -1,3 +1,4 @@
+```python
 import logging
 import re
 import json
@@ -22,7 +23,8 @@ from telegram.ext import (
 )
 
 # --- Configuration ---
-BOT_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"
+import os
+BOT_TOKEN = os.environ.get("BOT_TOKEN")  # Set this in your environment variables
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 
 # --- Logger ---
@@ -139,6 +141,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Photos or Carousel
     if info.items:
         if len(info.items) > 1:
+            # send as media group
             media_group = []
             for media_url in info.items:
                 if media_url.endswith('.mp4'):
@@ -172,9 +175,11 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     info = user_state.get(chat_id)
     if not info:
         return await query.edit_message_text("Session expired.")
+    # find URL
     for label, media_url in info.formats:
         if label == choice:
             await query.edit_message_text(f"Downloading *{choice}*...", parse_mode='Markdown')
+            # send media
             if media_url.endswith('.mp3') or 'audio' in label.lower():
                 await context.bot.send_audio(chat_id, media_url)
             else:
@@ -192,3 +197,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+```
