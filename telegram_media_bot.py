@@ -21,10 +21,12 @@ from telegram.ext import (
     ContextTypes,
     filters,
 )
+import yt_dlp.utils
 
 # --- Configuration ---
 BOT_TOKEN = os.environ.get("BOT_TOKEN")  # Set this in your environment variables
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+COOKIES_FILE = "cookies.txt"  # Place your exported YouTube cookies here
 
 # --- Logger ---
 logging.basicConfig(
@@ -47,24 +49,52 @@ class MediaInfo:
         self.caption = caption             # text caption
 
 # --- Utils ---
-def extract_video_formats(url: str) -> MediaInfo:
-    opts = {"skip_download": True, "quiet": True}
-    with yt_dlp.YoutubeDL(opts) as ydl:
-        info = ydl.extract_info(url, download=False)
-    formats = []
-    for f in info.get("formats", []):
-        if f.get("vcodec") and f.get("url"):
-            size = f.get("filesize") or f.get("filesize_approx") or 0
-            mb = round(size / (1024*1024), 1) if size else None
-            note = f.get("format_note") or f.get("height")
-            label = f"{note}p ({mb}MB)" if mb else f"{note}p"
-            formats.append((label, f["url"]))
-    return MediaInfo(
-        platform="video",
-        title=info.get("title"),
-        formats=formats,
-        thumbnail=info.get("thumbnail"),
-    )
+"
+"def extract_video_formats(url: str) -> MediaInfo:
+"
+"    # Use yt-dlp without cookies; login-required videos will error
+"
+"    opts = {"skip_download": True, "quiet": True}
+"
+"    try:
+"
+"        with yt_dlp.YoutubeDL(opts) as ydl:
+"
+"            info = ydl.extract_info(url, download=False)
+"
+"    except Exception as e:
+"
+"        # Could be age-restricted or login-required
+"
+"        raise ValueError("This video cannot be downloaded without login/cookies.")
+"
+"    formats = []
+"
+"    for f in info.get("formats", []):
+"
+"        if f.get("vcodec") and f.get("url"):
+"
+"            size = f.get("filesize") or f.get("filesize_approx") or 0
+"
+"            mb = round(size / (1024*1024), 1) if size else None
+"
+"            note = f.get("format_note") or f.get("height")
+"
+"            label = f"{note}p ({mb}MB)" if mb else f"{note}p"
+"
+"            formats.append((label, f["url"]))
+"
+"    return MediaInfo(
+"
+"        platform="video",
+"
+"        title=info.get("title"),
+"
+"        formats=formats,
+"
+"        thumbnail=info.get("thumbnail"),
+"
+"    )
 
 # --- Downloaders ---
 async def youtube_metadata(url: str) -> MediaInfo:
@@ -81,16 +111,9 @@ async def instagram_metadata(url: str) -> MediaInfo:
 
     # Carousel
     if media.get("__typename") == "GraphSidecar":
-        items = []
-        for edge in media["edge_sidecar_to_children"]["edges"]:
-            node = edge["node"]
-            items.append(node.get("video_url") or node.get("display_url"))
-        return MediaInfo(
-            platform="instagram",
-            title=title,
-            items=items,
-            caption=caption,
-        )
+        items = [edge["node"].get("video_url") or edge["node"].get("display_url")
+                 for edge in media["edge_sidecar_to_children"]["edges"]]
+        return MediaInfo(platform="instagram", title=title, items=items, caption=caption)
     # Single
     if media.get("is_video"):
         return extract_video_formats(url)
@@ -105,15 +128,10 @@ async def facebook_metadata(url: str) -> MediaInfo:
     info = extract_video_formats(url)
     if info.formats:
         return info
-    # Photo posts fallback
     mobile = url.replace("www.facebook.com", "mbasic.facebook.com")
     resp = requests.get(mobile, headers=HEADERS)
-    urls = re.findall(r'<img src="(https://lookaside\\.fbsbx\\.com/[^\"]+)"', resp.text)
-    return MediaInfo(
-        platform="facebook",
-        title="Facebook Photos",
-        items=urls
-    )
+    urls = re.findall(r'<img src="(https://lookaside\\.fbsbx\\.com/[^"]+)"', resp.text)
+    return MediaInfo(platform="facebook", title="Facebook Photos", items=urls)
 
 # --- Bot Handlers ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -133,6 +151,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             info = await facebook_metadata(url)
         else:
             return await update.message.reply_text("Invalid link.")
+    except ValueError as e:
+        return await update.message.reply_text(str(e))
     except Exception as e:
         logger.error("Error fetching media: %s", e)
         return await update.message.reply_text("Failed to fetch media.")
@@ -140,13 +160,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Photos or Carousel
     if info.items:
         if len(info.items) > 1:
-            # send as media group
-            media_group = []
-            for media_url in info.items:
-                if media_url.endswith('.mp4'):
-                    media_group.append(InputMediaVideo(media_url))
-                else:
-                    media_group.append(InputMediaPhoto(media_url))
+            media_group = [
+                InputMediaVideo(m) if m.endswith('.mp4') else InputMediaPhoto(m)
+                for m in info.items
+            ]
             await context.bot.send_media_group(chat_id, media_group)
         else:
             m = info.items[0]
@@ -174,11 +191,9 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     info = user_state.get(chat_id)
     if not info:
         return await query.edit_message_text("Session expired.")
-    # find URL
     for label, media_url in info.formats:
         if label == choice:
             await query.edit_message_text(f"Downloading *{choice}*...", parse_mode='Markdown')
-            # send media
             if media_url.endswith('.mp3') or 'audio' in label.lower():
                 await context.bot.send_audio(chat_id, media_url)
             else:
