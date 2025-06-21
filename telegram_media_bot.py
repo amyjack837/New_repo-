@@ -1,4 +1,3 @@
-```python
 import os
 import logging
 import re
@@ -24,7 +23,6 @@ from telegram.ext import (
 )
 
 # --- Configuration ---
-import os
 BOT_TOKEN = os.environ.get("BOT_TOKEN")  # Set this in your environment variables
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 
@@ -74,7 +72,7 @@ async def youtube_metadata(url: str) -> MediaInfo:
 
 async def instagram_metadata(url: str) -> MediaInfo:
     resp = requests.get(url, headers=HEADERS)
-    m = re.search(r"window\._sharedData = (.*?);</script>", resp.text)
+    m = re.search(r"window\\._sharedData = (.*?);</script>", resp.text)
     data = json.loads(m.group(1))
     media = data["entry_data"]["PostPage"][0]["graphql"]["shortcode_media"]
     title = media.get("accessibility_caption") or "Instagram Media"
@@ -110,7 +108,7 @@ async def facebook_metadata(url: str) -> MediaInfo:
     # Photo posts fallback
     mobile = url.replace("www.facebook.com", "mbasic.facebook.com")
     resp = requests.get(mobile, headers=HEADERS)
-    urls = re.findall(r'<img src="(https://lookaside\.fbsbx\.com/[^"]+)"', resp.text)
+    urls = re.findall(r'<img src="(https://lookaside\\.fbsbx\\.com/[^\"]+)"', resp.text)
     return MediaInfo(
         platform="facebook",
         title="Facebook Photos",
@@ -198,4 +196,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-```
